@@ -179,7 +179,7 @@ def dashboard():
 
     st.divider()
     st.subheader("Explain this result")
-    st.caption("Optional AI explanation. The model receives the computed allocation and checks; it is instructed to preserve those results.")
+    st.caption("Get a plain-English summary of where the money goes, why it was chosen, how it compares, and the main risks. The AI is instructed to use the calculated amounts and check results.")
     session_key = st.text_input(
         "Azure API key (current session)", type="password", key="azure_api_key",
         help="Optional override for the server's environment key. Used only for Azure requests; not written to reports or project files.",

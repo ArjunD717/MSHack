@@ -160,6 +160,13 @@ To enable the AI explanation in the dashboard, paste your key into the masked
 **Azure API key (current session)** field near the bottom. It is kept in the
 current dashboard session and is not saved to project files or reports.
 
+The optional explanation uses plain English for readers with little investment
+knowledge. It starts with the result, then covers where the money goes, why it
+was selected, how it compares with the baseline, and the main risks and limits.
+The same instructions apply in the dashboard and CLI. The AI is instructed to
+preserve calculated amounts, check results and missing-evidence warnings; it
+does not select investments or change the allocation.
+
 Alternatively, set the key before starting the dashboard or CLI. A key set in a
 different PowerShell window will not update an already-running server:
 
@@ -197,6 +204,9 @@ not agreed client requirements or universal definitions of low risk.
 | Allocation increments | 5 percentage points |
 | Assumed cash interest | 0% |
 | Baseline | Required cash reserve plus the rest in BIL |
+| Minimum fund holdings (cash excluded) | 3 |
+| Minimum size of each held fund | 10% of the full budget |
+| Maximum size of any one fund | 35% of the full budget |
 
 The claim is a single total payment, not an additional payment on top of the
 reserve. Only CASH counts as immediately accessible; an ETF is not cash. Sale
@@ -262,6 +272,50 @@ IEF (7–10 year Treasuries). They share US Treasury exposure; adding fund ticke
 does not remove this common risk. Eligibility here means a sourced Treasury ETF
 classification, not a credit-rating, solvency or regulatory capital assessment.
 
+### Enforced spreading across Treasury funds
+
+The default engine now requires **at least three funds**, with every nonzero fund
+holding between **10% and 35% of the full budget**. These are editable prototype
+assumptions, not investment rules. Cash does not count as a fund and has no 35%
+cap: the immediately accessible reserve still takes priority through its own
+minimum. Tiny token allocations fail the minimum-size check. All amounts are
+checked after rounding to cents, matching the displayed allocation. The rules
+apply to starting weights; the historical replay remains buy-and-hold, so weights
+may drift and there is no rebalancing model.
+
+This spreads the current three-fund universe across Treasury maturities. It does
+not add company shares, corporate credit, other issuers or asset classes, and
+does not guarantee a smaller loss. All existing risk and evidence checks still
+apply. The engine returns infeasible if the holdings, cash, grid and risk limits
+cannot be met together; it never reduces the holding count or loosens risk limits
+automatically. An evidence gap remains unverified even if a required fund could
+otherwise be omitted to improve the result. Coarse grids can make the policy
+infeasible: for example, 25% steps force at least 25% into IEF, which can breach
+the rate-loss limit. The default 5% steps avoid that particular grid restriction.
+
+`config/client_policy.json` and `ClientPolicy` share these defaults. The existing
+Streamlit dashboard uses the rules automatically through the backend; its layout
+has not changed. Restart Streamlit or recalculate to apply them. The rules appear
+in its check table and evidence. Custom policy files omitting the new fields also
+inherit the defaults. Adjust `minimum_holdings`, `minimum_holding_pct` and
+`maximum_holding_pct` explicitly when using a different fund universe.
+
+Reports explain the income and risk trade-off against a second search over the
+same grid, evidence and risk limits, ignoring just the three holding rules.
+`validation.json` stores this under
+`diversification.comparison_without_holding_limits`; its check status is retained
+and it is clearly labelled as a comparison, never an eligible fallback. It is
+also included in `portfolio_comparison.csv`. The original single-BIL baseline
+remains for comparison and now fails the holding-count and concentration checks.
+
+Using the cached 23 October 2026 snapshot, the diversified result was $25,000
+cash, $30,000 BIL, $35,000 SHY and $10,000 IEF. Current annual income was $3,270,
+versus $3,510 without holding limits: a $240 reduction. The historical largest
+fall was 4.459%, versus 4.347% for the concentrated reference, illustrating why
+spreading holdings does not improve every risk measure. These numbers depend on
+the supplied prices, issuer facts and policy; they are not fixed outputs or
+forecasts.
+
 ## Issuer evidence: update separately from prices
 
 `config/fund_facts.json` contains manually reviewed issuer values with individual
@@ -284,7 +338,7 @@ facts are never applied as if they were historical predictors in the price repla
 ## Price source and custom universes
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --data-only --refresh --tickers BIL SHY --start 2020-01-01 --end 2026-10-23
+.\.venv\Scripts\python.exe main.py --data-only --refresh --tickers BIL SHY IEF --start 2020-01-01 --end 2026-10-23
 ```
 
 Add reviewed entries for custom tickers to the facts file, and set the policy's

@@ -37,7 +37,9 @@ def fixture():
 class PortfolioTests(unittest.TestCase):
     def setUp(self):
         self.prices, self.metadata, self.facts = fixture()
-        self.policy = ClientPolicy(grid_step_pct=25)
+        # Existing risk/evidence regressions use the former holding rules.
+        # The diversification defaults are covered separately below.
+        self.policy = ClientPolicy(grid_step_pct=25, minimum_holdings=0, maximum_holding_pct=100)
 
     def run_case(self, policy=None, facts=None, as_of=TODAY):
         return run_validation(self.prices, self.metadata, policy or self.policy,
@@ -142,7 +144,10 @@ class PortfolioTests(unittest.TestCase):
 
     def test_invalid_policies_are_rejected(self):
         for kwargs in ({"budget_usd": -1}, {"budget_usd": "100000"}, {"budget_usd": float("nan")},
-                       {"grid_step_pct": 3}, {"currency": "GBP"}, {"rate_shock_bps": 500}, {"minimum_history_sessions": 1}):
+                       {"grid_step_pct": 3}, {"currency": "GBP"}, {"rate_shock_bps": 500}, {"minimum_history_sessions": 1},
+                       {"minimum_holdings": 2.5}, {"minimum_holdings": True}, {"minimum_holdings": -1},
+                       {"minimum_holding_pct": 0}, {"minimum_holding_pct": 40, "maximum_holding_pct": 35},
+                       {"maximum_holding_pct": 101}, {"maximum_holding_pct": float("nan")}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 ClientPolicy(**kwargs)
 
@@ -165,6 +170,98 @@ class PortfolioTests(unittest.TestCase):
                 self.assertNotIn('<script src="https://cdn.plot.ly', output)
                 self.assertIn("prototype", deterministic_report(result).lower())
                 self.assertIn("date", history.index.names)
+
+
+class DiversificationTests(unittest.TestCase):
+    def setUp(self):
+        self.prices, self.metadata, self.facts = fixture()
+
+    def run_case(self, policy=None, facts=None, metadata=None, prices=None):
+        return run_validation(self.prices if prices is None else prices,
+                              self.metadata if metadata is None else metadata,
+                              ClientPolicy() if policy is None else policy,
+                              self.facts if facts is None else facts, TODAY)
+
+    def test_default_selected_and_alternatives_obey_all_rules(self):
+        result = self.run_case()
+        self.assertEqual(result["status"], "feasible")
+        for candidate in [result["selected"], *result["alternatives"]]:
+            investments = [weight * 100 for ticker, weight in candidate["weights"].items() if ticker != "CASH" and weight > 0]
+            self.assertGreaterEqual(len(investments), 3)
+            self.assertTrue(all(10 - 1e-8 <= weight <= 35 + 1e-8 for weight in investments))
+            self.assertTrue(all(item["status"] == "pass" for item in candidate["checks"]))
+        self.assertEqual(result["selected"]["metrics"]["investment_holdings"], 3)
+
+    def test_old_75_percent_shy_portfolio_fails_and_cash_is_not_a_holding(self):
+        result = self.run_case()
+        old = next(c for c in result["candidate_audit"] if c["CASH"] == 25000 and c["SHY"] == 75000)
+        self.assertEqual(old["status"], "fail")
+        self.assertIn("Maximum single holding (%)", old["failed_checks"])
+        self.assertIn("Minimum investment holdings", old["failed_checks"])
+        cash_only = next(c for c in result["candidate_audit"] if c["CASH"] == 100000)
+        self.assertEqual(cash_only["investment_holdings"], 0)
+        self.assertIn("Minimum investment holdings", cash_only["failed_checks"])
+
+    def test_token_holding_fails_even_if_the_count_is_three(self):
+        result = self.run_case()
+        candidate = next(c for c in result["candidate_audit"] if c["CASH"] == 25000 and c["BIL"] == 35000 and c["SHY"] == 35000 and c["IEF"] == 5000)
+        self.assertEqual(candidate["investment_holdings"], 3)
+        self.assertIn("Minimum holding size (%)", candidate["failed_checks"])
+        self.assertNotIn("Maximum single holding (%)", candidate["failed_checks"])
+
+    def test_existing_risk_limits_can_make_diversification_infeasible(self):
+        for policy in (ClientPolicy(maximum_rate_loss_usd=0), ClientPolicy(minimum_cash_usd=75000),
+                       ClientPolicy(minimum_holdings=4), ClientPolicy(grid_step_pct=25)):
+            with self.subTest(policy=policy):
+                result = self.run_case(policy)
+                self.assertEqual(result["status"], "infeasible")
+                self.assertIsNone(result["selected"])
+                self.assertIsNone(result["provisional"])
+
+    def test_two_symbol_universe_does_not_silently_reduce_required_count(self):
+        metadata = {**self.metadata, "tickers": ["BIL", "SHY"]}
+        prices = self.prices.loc[self.prices["ticker"].isin(metadata["tickers"])]
+        result = self.run_case(metadata=metadata, prices=prices)
+        self.assertEqual(result["status"], "infeasible")
+        self.assertEqual(result["policy"]["minimum_holdings"], 3)
+
+    def test_missing_required_evidence_cannot_be_avoided_with_fewer_holdings(self):
+        facts = copy.deepcopy(self.facts)
+        facts["funds"]["IEF"].pop("duration_years")
+        result = self.run_case(facts=facts)
+        self.assertEqual(result["status"], "unverified")
+        self.assertIsNone(result["selected"])
+        self.assertIsNotNone(result["provisional"])
+        self.assertGreaterEqual(result["provisional"]["amounts_usd"]["IEF"], 10000)
+
+    def test_reference_measures_income_cost_without_becoming_fallback(self):
+        result = self.run_case()
+        reference = result["diversification"]["comparison_without_holding_limits"]
+        self.assertEqual(reference["amounts_usd"]["SHY"], 75000)
+        self.assertEqual(reference["status"], "fail")
+        self.assertLessEqual(result["diversification"]["income_change_vs_without_holding_limits_usd"], 0)
+        self.assertEqual(result["baseline"]["status"], "fail")
+        report = deterministic_report(result)
+        self.assertIn("not a fallback", report)
+        self.assertIn("US government debt", report)
+        self.assertIn("Spreading the investment", render_html(result, build_figures(result, self.prices)[0]))
+
+    def test_cent_rounding_cannot_bypass_holding_limits(self):
+        policy = ClientPolicy(budget_usd=100000.03, minimum_cash_usd=25000.01)
+        result = self.run_case(policy)
+        selected = result["selected"]
+        self.assertIsNotNone(selected)
+        self.assertEqual(round(sum(selected["amounts_usd"].values()), 2), policy.budget_usd)
+        for ticker, weight in selected["weights"].items():
+            if ticker != "CASH" and weight:
+                self.assertGreaterEqual(weight * 100 + 1e-8, policy.minimum_holding_pct)
+                self.assertLessEqual(weight * 100, policy.maximum_holding_pct + 1e-8)
+
+    def test_cash_above_holding_cap_is_allowed_when_reserve_requires_it(self):
+        result = self.run_case(ClientPolicy(minimum_cash_usd=50000))
+        self.assertEqual(result["status"], "feasible")
+        self.assertGreaterEqual(result["selected"]["amounts_usd"]["CASH"], 50000)
+        self.assertEqual(result["selected"]["metrics"]["investment_holdings"], 3)
 
 
 if __name__ == "__main__":

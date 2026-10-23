@@ -136,7 +136,7 @@ class FredAnalysisTests(unittest.TestCase):
 
     def test_prices_income_checks_and_selection_are_not_modified(self):
         prices, metadata, facts = fixture()
-        result = run_validation(prices, metadata, ClientPolicy(grid_step_pct=25), facts, TODAY)
+        result = run_validation(prices, metadata, ClientPolicy(), facts, TODAY)
         before = copy.deepcopy(result)
         attach_rate_analysis(result, rate_fixture())
         for name in ("status", "search", "policy", "candidate_audit"):

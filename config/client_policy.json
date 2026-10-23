@@ -16,5 +16,8 @@
   "minimum_history_sessions": 252,
   "grid_step_pct": 5,
   "cash_annual_rate_pct": 0.0,
-  "baseline_ticker": "BIL"
+  "baseline_ticker": "BIL",
+  "minimum_holdings": 3,
+  "minimum_holding_pct": 10.0,
+  "maximum_holding_pct": 35.0
 }

@@ -21,6 +21,31 @@ def focus_candidate(result):
     return result["selected"] or result["provisional"]
 
 
+def diversification_lines(result):
+    info = result.get("diversification")
+    if info is None:
+        return []
+    policy = result["policy"]
+    lines = [f"Keep at least {policy['minimum_holdings']} funds. Each held fund must receive at least {policy['minimum_holding_pct']:g}% and at most {policy['maximum_holding_pct']:g}% of the full budget; cash is excluded.",
+             info["scope"], "The single-fund baseline is a comparison and may fail the holding rules."]
+    focus = focus_candidate(result)
+    if focus:
+        lines.append(f"The shown allocation holds {focus['metrics']['investment_holdings']} funds. Its largest fund holding is {focus['metrics']['largest_holding_pct']:.2f}% of the full budget.")
+    reference = info["comparison_without_holding_limits"]
+    if reference:
+        dollars = ", ".join(f"{ticker} ${amount:,.2f}" for ticker, amount in reference["amounts_usd"].items() if amount)
+        lines.append(f"Without holding limits, the same search would choose: {dollars}. This is a comparison, not a fallback recommendation.")
+        change = info["income_change_vs_without_holding_limits_usd"]
+        if change is not None:
+            lines.append(f"Current annual income change from enforcing the holding rules: ${change:+,.2f}. This is not a prediction of future performance.")
+        if result["selected"]:
+            before, after = reference["metrics"], result["selected"]["metrics"]
+            lines.append(f"Historical largest fall: {before['max_drawdown_pct']:.3f}% without the holding limits, compared with {after['max_drawdown_pct']:.3f}% for the selected mix.")
+            lines.append(f"Estimated loss under the same upward rate shock: ${before['rate_up_loss_usd']:,.2f} without the holding limits, compared with ${after['rate_up_loss_usd']:,.2f} for the selected mix.")
+    lines.append("Requiring more funds does not guarantee lower risk. The existing cash, loss and evidence limits must still pass. These rules apply to the starting allocation; weights can drift as prices change.")
+    return lines
+
+
 def rate_report_lines(result):
     """Portable text for the CLI, Markdown and offline report; no dashboard changes."""
     context = result.get("interest_rates")
@@ -224,6 +249,9 @@ def deterministic_report(result):
             lines.append(f"| {item['name']} | {item['status'].upper()} | {format_check_value(item['name'], item['measured'])} | {format_check_value(item['name'], item['limit'])} |")
     else:
         lines += ["No allocation passes every required check. Review the binding constraints; the tool has not relaxed them.", ""]
+    diversification = diversification_lines(result)
+    if diversification:
+        lines += ["", "## Spreading the investment", "", *diversification]
     lines += ["", "## Baseline comparison", ""]
     baseline = result["baseline"]
     if baseline:
@@ -265,13 +293,15 @@ def render_html(result, figures):
     failures = html.escape(json.dumps(result["search"], indent=2))
     rate_lines = rate_report_lines(result)
     rates_html = ("<h2>Interest rates (FRED)</h2>" + "".join(f"<p>{html.escape(line)}</p>" for line in rate_lines)) if rate_lines else ""
+    diversification = diversification_lines(result)
+    diversification_html = ("<h2>Spreading the investment</h2>" + "".join(f"<p>{html.escape(line)}</p>" for line in diversification)) if diversification else ""
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claims reserve allocation</title><style>
 body{{margin:0;background:#f4f7fb;color:#172033;font:15px/1.6 Arial,sans-serif}}main{{max-width:1180px;margin:40px auto;padding:32px;background:white;border-radius:18px}}h1{{font-size:32px;line-height:1.2}}h2{{margin-top:36px}}.tag{{color:#0d9488;font-weight:bold}}.scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:13px}}td,th{{padding:10px;text-align:left;border-bottom:1px solid #e2e8f0}}th{{background:#eff6ff}}pre{{white-space:pre-wrap;background:#f8fafc;padding:16px}}a{{color:#2563eb}}
 </style></head><body><main><p class="tag">CLAIMS FIRST · PROTOTYPE 1</p><h1>{html.escape(title)}</h1>
 <p>${p['budget_usd']:,.0f} USD · {p['horizon_months']} months · ${p['minimum_cash_usd']:,.0f} immediately accessible reserve.</p>
 <p>Editable demo assumptions. Current income run-rate is not a forecast. Historical replay has no claims withdrawals.</p>
-{plots}<h2>Allocation checks</h2><div class="scroll">{checks_html}</div><h2>Baseline comparison</h2><div class="scroll">{comparison_html}</div>
+{plots}{diversification_html}<h2>Allocation checks</h2><div class="scroll">{checks_html}</div><h2>Baseline comparison</h2><div class="scroll">{comparison_html}</div>
 {rates_html}<h2>Fund evidence</h2><div class="scroll">{fund_html}</div><h2>Search audit</h2><pre>{failures}</pre>
 <h2>How to read this report</h2><ul>{notes}</ul><h2>Issuer sources and dates</h2><ul>{sources}</ul>
 <p>Analysis date: {result['analysis_date']}. Price window: {result['common_history']['start']}–{result['common_history']['end']}.</p></main></body></html>'''
