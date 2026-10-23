@@ -2,3 +2,5 @@
 
 DEFINED THE PROBLEM/PROPOSED SOLUTION: 
 - LOW RISK MEANS PRIEC HASNT FLUCTUATED MASSIVELY 
+
+rodney -> currently working on the analysis pipeline; asking ai to make a prototype pulling a small amount of data to evaluate output.
