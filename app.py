@@ -4,6 +4,7 @@ import io
 import hashlib
 import json
 import os
+import re
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -198,7 +199,8 @@ def dashboard():
     if not credential:
         st.caption("Paste your key above, or set AZURE_OPENAI_API_KEY before starting the dashboard.")
     if "ai_explanation" in st.session_state:
-        st.markdown(st.session_state.ai_explanation)
+        # Currency must stay literal: paired dollars otherwise trigger math rendering.
+        st.markdown(re.sub(r"(?<!\\)\$", r"\\$", st.session_state.ai_explanation))
 
 
 if __name__ == "__main__":

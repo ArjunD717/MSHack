@@ -39,6 +39,15 @@ class DashboardTests(unittest.TestCase):
                 self.assertEqual(list(app.exception), [])
                 self.assertFalse(next(b for b in app.button if b.label == "Generate AI explanation").disabled)
                 self.assertNotIn("session-ui-test-only", (root / "model_input.json").read_text())
+                explanation = "Cash meets the **$25,000** minimum. **$98,653** remains for a \\$40,000 claim."
+                with patch("main.analyze", return_value=explanation):
+                    next(b for b in app.button if b.label == "Generate AI explanation").click().run(timeout=45)
+                self.assertEqual(list(app.exception), [])
+                self.assertTrue(any(
+                    item.value == "Cash meets the **\\$25,000** minimum. **\\$98,653** remains for a \\$40,000 claim."
+                    for item in app.markdown
+                ))
+                self.assertEqual((root / "analysis.md").read_text(), explanation)
                 initial = json.loads((root / "validation.json").read_text())
                 self.assertEqual(initial["selected"]["metrics"]["investment_holdings"], 3)
                 self.assertLessEqual(initial["selected"]["metrics"]["largest_holding_pct"], 35 + 1e-8)
@@ -47,6 +56,7 @@ class DashboardTests(unittest.TestCase):
                 next(b for b in app.button if b.label == "Recalculate allocation").click().run(timeout=45)
                 self.assertEqual(list(app.exception), [])
                 self.assertEqual(app.metric[0].value, "$40,000")
+                self.assertFalse(any("Cash meets the" in item.value for item in app.markdown))
                 saved = json.loads((root / "validation.json").read_text())
                 self.assertEqual(saved["policy"]["minimum_cash_usd"], 40000)
                 self.assertEqual(saved["selected"]["amounts_usd"]["CASH"], 40000)
@@ -57,7 +67,7 @@ class DashboardTests(unittest.TestCase):
                 saved = json.loads((root / "validation.json").read_text())
                 self.assertEqual(saved["status"], "infeasible")
                 self.assertIsNone(saved["selected"])
-                self.assertFalse((root / "analysis.md").exists())
+                self.assertEqual((root / "analysis.md").read_text(), explanation)
 
 
 if __name__ == "__main__":
