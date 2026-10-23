@@ -100,15 +100,34 @@ class ModelConnectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "AZURE_OPENAI_API_KEY"):
             main.analyze({})
 
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("main.AzureOpenAI")
+    def test_session_key_can_be_used_without_an_environment_key(self, azure):
+        client = azure.return_value.__enter__.return_value
+        client.chat.completions.create.return_value = SimpleNamespace(choices=[
+            SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="Session explanation"))
+        ])
+        payload = main.build_payload({"instruments": []})
+        self.assertEqual(main.analyze(payload, api_key=" session-test-only "), "Session explanation")
+        self.assertEqual(azure.call_args.kwargs["api_key"], "session-test-only")
+        self.assertNotIn("session-test-only", json.dumps(payload))
+
     @patch("main.analyze")
-    @patch("main.prepare_market_data", return_value={"instruments": []})
+    @patch("main.prepare_market_data")
     def test_data_only_saves_input_without_ai(self, prepare, analyze):
+        from test_portfolio import fixture
+        prices, metadata, _ = fixture()
+        prepare.return_value = {"source": metadata, "instruments": []}
         with tempfile.TemporaryDirectory() as folder:
+            prices.to_csv(Path(folder) / "prices.csv", index=False)
             with patch("sys.argv", ["main.py", "--data-only", "--data-dir", folder]), patch("builtins.print"):
                 main.main()
             analyze.assert_not_called()
             saved = json.loads((Path(folder) / "model_input.json").read_text())
-            self.assertEqual(saved["client"]["budget"], 100_000)
+            self.assertEqual(saved["client"]["budget_usd"], 100_000)
+            self.assertIn("selected", saved["validation_result"])
+            self.assertTrue((Path(folder) / "report.html").exists())
+            self.assertTrue((Path(folder) / "candidate_allocations.csv").exists())
 
 
 if __name__ == "__main__":

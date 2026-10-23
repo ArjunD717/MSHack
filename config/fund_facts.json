@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-10-23",
+  "method": "Manually transcribed issuer snapshot; refresh prices does not refresh these facts. Fields are dated separately. Missing or stale fields are unverified.",
+  "yield_convention": "30-day SEC yield, after fund expenses; do not subtract the expense ratio again. An income run-rate comparison, not a forecast. Waiver treatment can differ between funds.",
+  "funds": {
+    "BIL": {
+      "name": "State Street SPDR Bloomberg 1-3 Month T-Bill ETF",
+      "source_url": "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil",
+      "identity_as_of": "2026-10-23",
+      "quote_currency": "USD",
+      "asset_class": "us_treasury_etf",
+      "duration_years": 0.10,
+      "duration_as_of": "2026-10-22",
+      "sec_yield_pct": 3.76,
+      "yield_as_of": "2026-10-21",
+      "spread_pct": 0.01,
+      "spread_as_of": "2026-10-22",
+      "expense_ratio_pct": 0.1353
+    },
+    "SHY": {
+      "name": "iShares 1-3 Year Treasury Bond ETF",
+      "source_url": "https://www.ishares.com/us/products/239452/ishares-13-year-treasury-bond-etf",
+      "identity_as_of": "2026-10-23",
+      "quote_currency": "USD",
+      "asset_class": "us_treasury_etf",
+      "duration_years": 1.79,
+      "duration_as_of": "2026-10-21",
+      "sec_yield_pct": 4.68,
+      "yield_as_of": "2026-10-21",
+      "spread_pct": 0.01,
+      "spread_as_of": "2026-10-22",
+      "expense_ratio_pct": 0.15
+    },
+    "IEF": {
+      "name": "iShares 7-10 Year Treasury Bond ETF",
+      "source_url": "https://www.ishares.com/us/products/239456/ishares-710-year-treasury-bond-etf",
+      "identity_as_of": "2026-10-23",
+      "quote_currency": "USD",
+      "asset_class": "us_treasury_etf",
+      "duration_years": 6.83,
+      "duration_as_of": "2026-10-21",
+      "sec_yield_pct": 5.04,
+      "yield_as_of": "2026-10-21",
+      "spread_pct": 0.01,
+      "spread_as_of": "2026-10-22",
+      "expense_ratio_pct": 0.15
+    }
+  }
+}

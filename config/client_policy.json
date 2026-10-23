@@ -1,0 +1,20 @@
+{
+  "budget_usd": 100000,
+  "currency": "USD",
+  "horizon_months": 12,
+  "minimum_cash_usd": 25000,
+  "maximum_volatility_pct": 2.0,
+  "maximum_drawdown_pct": 5.0,
+  "maximum_rate_loss_usd": 2000,
+  "rate_shock_bps": 100,
+  "stressed_claim_usd": 40000,
+  "claim_due_days": 30,
+  "assumed_sale_delay_days": 3,
+  "maximum_spread_pct": 0.1,
+  "maximum_price_age_days": 7,
+  "maximum_fact_age_days": 30,
+  "minimum_history_sessions": 252,
+  "grid_step_pct": 5,
+  "cash_annual_rate_pct": 0.0,
+  "baseline_ticker": "BIL"
+}
