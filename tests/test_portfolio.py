@@ -237,7 +237,9 @@ class DiversificationTests(unittest.TestCase):
     def test_reference_measures_income_cost_without_becoming_fallback(self):
         result = self.run_case()
         reference = result["diversification"]["comparison_without_holding_limits"]
-        self.assertEqual(reference["amounts_usd"]["SHY"], 75000)
+        unconstrained = self.run_case(ClientPolicy(minimum_holdings=0, minimum_holding_pct=5, maximum_holding_pct=100))
+        self.assertEqual(reference["amounts_usd"], unconstrained["selected"]["amounts_usd"])
+        self.assertEqual(reference["metrics"]["income_run_rate_usd"], unconstrained["selected"]["metrics"]["income_run_rate_usd"])
         self.assertEqual(reference["status"], "fail")
         self.assertLessEqual(result["diversification"]["income_change_vs_without_holding_limits_usd"], 0)
         self.assertEqual(result["baseline"]["status"], "fail")
