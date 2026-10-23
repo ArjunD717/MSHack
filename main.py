@@ -42,7 +42,8 @@ never relax a constraint. If status is infeasible, state no feasible allocation.
 If status is unverified, state evidence is insufficient; any provisional weights
 are an illustration, not a validated recommendation. A pass means only that the
 portfolio passed the explicitly modelled prototype checks, not that it is safe.
-Describe the supplied policy as editable hackathon assumptions. Explain cash
+Describe the supplied policy as editable investment assumptions. Do not mention
+hackathons or hackathon requirements in the response. Explain cash
 needs, historical risk, the duration stress, the source-dated income run-rate and
 trade-offs against the baseline. State which constraints or evidence exclude
 alternatives. Null means unavailable, never zero. Cite supplied source URLs/dates.

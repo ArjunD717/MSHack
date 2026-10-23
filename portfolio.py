@@ -400,7 +400,7 @@ def run_validation(prices, metadata, policy, facts, as_of=None):
             "diversification": f"Require at least {policy.minimum_holdings} non-cash fund holdings, each between {policy.minimum_holding_pct:g}% and {policy.maximum_holding_pct:g}% of the full budget when held. Cash is excluded. All other evidence, cash, historical-risk and rate-stress checks still apply. If no allocation passes, no constraints are silently relaxed. Only initial allocation weights are constrained; buy-and-hold weights may later drift.",
         },
         "limitations": [
-            "All policy thresholds are editable hackathon assumptions, not universal definitions of low risk or regulatory approval.",
+            "All policy thresholds are editable investment assumptions, not universal definitions of low risk or regulatory approval.",
             "Selection uses known history and current facts. Historical results are retrospective validation, not an untouched out-of-sample forecast test.",
             "The three default funds share US Treasury exposure. More fund tickers do not remove that common exposure.",
             "A passing portfolio passes only these prototype checks. Settlement delays, market capacity and claims timing remain assumptions.",
