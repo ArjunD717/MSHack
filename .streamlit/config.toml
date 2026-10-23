@@ -1,9 +1,16 @@
+[server]
+headless = true
+
 [browser]
 gatherUsageStats = false
 
 [theme]
-base = "light"
-primaryColor = "#0d9488"
-backgroundColor = "#f5f7fb"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#172033"
+base = "dark"
+primaryColor = "#2dd4bf"
+backgroundColor = "#060b14"
+secondaryBackgroundColor = "#0c1524"
+textColor = "#e9f0fa"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"

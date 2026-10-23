@@ -12,6 +12,10 @@ from streamlit.testing.v1 import AppTest
 from test_portfolio import fixture
 
 
+def markdown_text(app):
+    return "\n".join(str(element.value) for element in app.markdown)
+
+
 class DashboardTests(unittest.TestCase):
     def test_recalculating_reserve_and_impossible_claim_updates_results(self):
         prices, metadata, facts = fixture()
@@ -33,23 +37,30 @@ class DashboardTests(unittest.TestCase):
                 app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py")).run(timeout=45)
                 self.assertEqual(list(app.exception), [])
                 self.assertEqual(list(app.error), [])
-                self.assertEqual(app.metric[0].value, "$25,000")
-                self.assertTrue(next(b for b in app.button if b.label == "Generate AI explanation").disabled)
-                app.text_input(key="azure_api_key").set_value("session-ui-test-only").run(timeout=45)
+                self.assertIn("$25,000", markdown_text(app))
+
+                app.radio(key="nav_section").set_value("Risk & Evidence").run(timeout=45)
                 self.assertEqual(list(app.exception), [])
-                self.assertFalse(next(b for b in app.button if b.label == "Generate AI explanation").disabled)
+                ai_button = next(b for b in app.button if b.label == "Generate AI brief")
+                self.assertTrue(ai_button.disabled)
+                app.text_input(key="sb_ai_key").set_value("session-ui-test-only").run(timeout=45)
+                ai_button = next(b for b in app.button if b.label == "Generate AI brief")
+                self.assertFalse(ai_button.disabled)
                 self.assertNotIn("session-ui-test-only", (root / "model_input.json").read_text())
-                app.number_input(key="reserve").set_value(40000)
-                next(b for b in app.button if b.label == "Recalculate allocation").click().run(timeout=45)
+
+                app.number_input(key="sb_reserve").set_value(40000)
+                next(b for b in app.button if b.label == "Apply & recalculate").click().run(timeout=45)
                 self.assertEqual(list(app.exception), [])
-                self.assertEqual(app.metric[0].value, "$40,000")
+                app.radio(key="nav_section").set_value("Portfolio Overview").run(timeout=45)
+                self.assertIn("$40,000", markdown_text(app))
                 saved = json.loads((root / "validation.json").read_text())
                 self.assertEqual(saved["policy"]["minimum_cash_usd"], 40000)
                 self.assertEqual(saved["selected"]["amounts_usd"]["CASH"], 40000)
-                app.number_input(key="claim").set_value(150000)
-                next(b for b in app.button if b.label == "Recalculate allocation").click().run(timeout=45)
+
+                app.number_input(key="sb_claim").set_value(150000)
+                next(b for b in app.button if b.label == "Apply & recalculate").click().run(timeout=45)
                 self.assertEqual(list(app.exception), [])
-                self.assertTrue(any("No feasible allocation" in e.value for e in app.error))
+                self.assertIn("No passing allocation", markdown_text(app))
                 saved = json.loads((root / "validation.json").read_text())
                 self.assertEqual(saved["status"], "infeasible")
                 self.assertIsNone(saved["selected"])
