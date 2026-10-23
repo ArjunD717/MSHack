@@ -15,8 +15,9 @@ From the project folder in PowerShell:
 
 Open the local address shown by Streamlit (normally http://localhost:8501).
 The first run downloads prices if there is no cache; later runs reuse local data.
-The dashboard works without an AI key. Change assumptions in the sidebar and click
-**Recalculate allocation**. Download the report and evidence from **Alternatives & export**.
+The dashboard works without an AI key. Open **Assumptions** in the header, change
+values and click **Apply & recalculate**. Use the top navigation for **Historical
+Analysis**, **Risk & Evidence**, and **Alternatives & Export**.
 
 For a fresh checkout, create the environment first with `py -m venv .venv`.
 Use Python 3.10 or newer.
@@ -156,8 +157,8 @@ alone. Only observations on/before `as_of` are used, but this does not recreate 
 historical vintage. Use a separate FRED refresh control and include the snapshot
 in the UI's result-cache fingerprint so refreshed data invalidates old results.
 
-To enable the AI explanation in the dashboard, paste your key into the masked
-**Azure API key (current session)** field near the bottom. It is kept in the
+To enable the AI explanation in the dashboard, open **Risk & Evidence** and paste
+your key into the masked **Azure API key (current session)** field. It is kept in the
 current dashboard session and is not saved to project files or reports.
 
 The optional explanation uses plain English for readers with little investment
