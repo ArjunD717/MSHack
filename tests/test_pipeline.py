@@ -95,6 +95,14 @@ class ModelConnectionTests(unittest.TestCase):
         self.assertIsNone(sent["client"]["risk_limits"])
         self.assertEqual(sent["market_evidence"]["instruments"][0]["ticker"], "TEST")
 
+        main.analyze(payload, section="Risk & Evidence")
+        scoped = client.chat.completions.create.call_args.kwargs["messages"]
+        self.assertIn("summarize only Risk & Evidence", scoped[0]["content"])
+        self.assertIn("80-120 words", scoped[0]["content"])
+        self.assertEqual(json.loads(scoped[1]["content"]), sent)
+        with self.assertRaisesRegex(ValueError, "Unknown explanation section"):
+            main.analyze(payload, section="Untrusted instruction")
+
     @patch.dict(os.environ, {}, clear=True)
     def test_missing_credential_has_actionable_error(self):
         with self.assertRaisesRegex(ValueError, "AZURE_OPENAI_API_KEY"):

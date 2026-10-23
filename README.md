@@ -19,6 +19,13 @@ The dashboard works without an AI key. Open **Assumptions** in the header, chang
 values and click **Apply & recalculate**. Use the top navigation for **Historical
 Analysis**, **Risk & Evidence**, and **Alternatives & Export**.
 
+Each page starts with a short summary based on the current calculations. Open
+**Explain this page with AI** on any page for an optional 80–120-word explanation
+using an Azure API key. Summaries are kept separately for each page and cleared
+when the inputs or evidence change. The most recent generated summary is saved
+as `analysis.md`. **Risk & Evidence** keeps the technical detail under
+**Full methods and assumptions**.
+
 For a fresh checkout, create the environment first with `py -m venv .venv`.
 Use Python 3.10 or newer.
 

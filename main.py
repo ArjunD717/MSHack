@@ -73,8 +73,15 @@ means they tended to move in opposite directions. Explain sample dates, counts,
 and R-squared as the share of return variation described by the fitted line in
 that sample. Neither correlation nor the fitted slope proves causation or future
 performance. Keep measured adjusted returns separate from duration price estimates.
-Return a Markdown explanation, aiming for 350-500 words. Keep essential evidence
-and uncertainty even if that needs a little more space. Begin with a two-sentence
+Write for a reader with no finance background. Prefer "money available now",
+"yearly income estimate", "past price movement", "largest past fall", "loss if
+rates rise", and "reference mix". Avoid "run-rate", "basis points", "haircut",
+"mark-to-market", "liquidity proxy" and "first-order". Translate the meaning
+instead of teaching terminology. Use sentences of roughly 15 words or fewer.
+Return a Markdown explanation, aiming for 180-250 words. Include qualifications
+beside the numbers they describe. Do not repeat the full methods or every caveat;
+cover the main risks and missing evidence relevant to the requested summary.
+Begin with a one-sentence
 overview stating whether an allocation passed, none qualified, or evidence is
 insufficient. Then use these four sections in this order:
 1. "Where the money goes": list each nonzero selected holding and its exact dollar
@@ -137,7 +144,26 @@ def run_pipeline(tickers, start, end, data_dir, refresh, policy, facts, fred=Fal
     return validation, payload
 
 
-def analyze(payload, api_key=None):
+EXPLANATION_SECTIONS = {
+    "Portfolio Overview": "Where the money goes, why this mix was chosen, cash available now, and the main risk.",
+    "Historical Analysis": "What the past-performance chart and rate-change tests mean, and whether money is available by the claim deadline. Distinguish observed history from estimated scenarios.",
+    "Risk & Evidence": "Which checks pass, fail or lack evidence, where the data comes from, and the main assumptions. Explain that refreshed prices do not refresh issuer facts.",
+    "Alternatives & Export": "How passing alternatives compare, why mixes were excluded, and what the downloadable reports contain. State the reference mix's check status when comparing it.",
+}
+
+
+def analyze(payload, api_key=None, section=None):
+    if section is not None and section not in EXPLANATION_SECTIONS:
+        raise ValueError("Unknown explanation section.")
+    prompt = SYSTEM_PROMPT
+    if section is not None:
+        prompt += (
+            f"\nFor this request, summarize only {section}: {EXPLANATION_SECTIONS[section]} "
+            "Replace the four-section format above with a one-sentence takeaway and "
+            "at most three short bullets. Aim for 80-120 words. Include the overall "
+            "validation status and any missing evidence that affects this section. "
+            "All evidence, arithmetic, source and uncertainty rules still apply."
+        )
     api_key = (api_key or os.environ.get("AZURE_OPENAI_API_KEY", "")).strip()
     if not api_key:
         raise ValueError("Set AZURE_OPENAI_API_KEY before requesting AI analysis, or use --data-only.")
@@ -151,7 +177,7 @@ def analyze(payload, api_key=None):
         response = client.chat.completions.create(
             model=os.environ.get("AZURE_OPENAI_MODEL", "gpt-6.1-sol"),
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(payload, allow_nan=False)},
             ],
             max_completion_tokens=4000,
