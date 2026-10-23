@@ -21,6 +21,78 @@ def focus_candidate(result):
     return result["selected"] or result["provisional"]
 
 
+def diversification_lines(result):
+    info = result.get("diversification")
+    if info is None:
+        return []
+    policy = result["policy"]
+    lines = [f"Keep at least {policy['minimum_holdings']} funds. Each held fund must receive at least {policy['minimum_holding_pct']:g}% and at most {policy['maximum_holding_pct']:g}% of the full budget; cash is excluded.",
+             info["scope"], "The single-fund baseline is a comparison and may fail the holding rules."]
+    focus = focus_candidate(result)
+    if focus:
+        lines.append(f"The shown allocation holds {focus['metrics']['investment_holdings']} funds. Its largest fund holding is {focus['metrics']['largest_holding_pct']:.2f}% of the full budget.")
+    reference = info["comparison_without_holding_limits"]
+    if reference:
+        dollars = ", ".join(f"{ticker} ${amount:,.2f}" for ticker, amount in reference["amounts_usd"].items() if amount)
+        lines.append(f"Without holding limits, the same search would choose: {dollars}. This is a comparison, not a fallback recommendation.")
+        change = info["income_change_vs_without_holding_limits_usd"]
+        if change is not None:
+            lines.append(f"Current annual income change from enforcing the holding rules: ${change:+,.2f}. This is not a prediction of future performance.")
+        if result["selected"]:
+            before, after = reference["metrics"], result["selected"]["metrics"]
+            lines.append(f"Historical largest fall: {before['max_drawdown_pct']:.3f}% without the holding limits, compared with {after['max_drawdown_pct']:.3f}% for the selected mix.")
+            lines.append(f"Estimated loss under the same upward rate shock: ${before['rate_up_loss_usd']:,.2f} without the holding limits, compared with ${after['rate_up_loss_usd']:,.2f} for the selected mix.")
+    lines.append("Requiring more funds does not guarantee lower risk. The existing cash, loss and evidence limits must still pass. These rules apply to the starting allocation; weights can drift as prices change.")
+    return lines
+
+
+def rate_report_lines(result):
+    """Portable text for the CLI, Markdown and offline report; no dashboard changes."""
+    context = result.get("interest_rates")
+    if context is None:
+        return []
+    lines = ["FRED interest-rate evidence", f"Fetched: {context['fetched_at_utc']}."]
+    for series_id, series in context["series"].items():
+        value = series["latest_rate_pct"]
+        rate = "Unavailable" if value is None else f"{value:.3f}%"
+        lines.append(f"{series_id} — {series['title']}: {rate} on {series['latest_date']}; {series['status']}. Source: {series['source_url']}")
+        for window, change in series["changes"].items():
+            bps = change["change_bps"]
+            text = "Unverified" if bps is None else f"{bps:+.2f} basis points"
+            lines.append(f"  {window}: {text}, {change['start']} to {change['end']}.")
+    for label in ("selected", "provisional", "baseline"):
+        candidate = result.get(label)
+        if candidate is None:
+            continue
+        for scenario in candidate.get("observed_rate_scenarios", []):
+            value = scenario["estimated_value_change_usd"]
+            text = "Unverified" if value is None else f"${value:+,.2f}"
+            lines.append(f"{label.title()}, {scenario['window']} observed yield moves applied to today's holdings: {text} estimated price change.")
+            for holding in scenario["holdings"]:
+                if holding["reason"]:
+                    lines.append(f"  {holding['ticker']}: {holding['reason']}.")
+    lines.append(context["method"])
+    relationships = result.get("rate_price_relationships")
+    if relationships:
+        lines += ["", "Observed relationship between rates and adjusted prices"]
+        for item in relationships["instruments"]:
+            if item["status"] != "available":
+                lines.append(f"{item['ticker']} / {item['proxy_series']}: unverified — {item['reason']} ({item['intervals']} matched intervals).")
+                continue
+            direction = ("opposite directions" if item["correlation"] < 0 else "the same direction")
+            lines.append(f"{item['ticker']} / {item['proxy_series']}: {item['intervals']} matched weekly intervals, {item['start']} to {item['end']}.")
+            lines.append(f"  Correlation {item['correlation']:+.3f}: yields and adjusted returns tended to move in {direction}. This does not prove that rate changes caused the returns.")
+            lines.append(f"  Fitted sensitivity: {item['slope_return_pct_per_100bps']:+.3f} percentage points of interval return per +100 bps of yield change; a historical slope, not a forecast or a duration measure.")
+            lines.append(f"  The fitted line describes {item['r_squared'] * 100:.1f}% of return variation in this sample (R-squared). Other variation remains unexplained by this line.")
+            for direction, key in (("rose", "rise"), ("fell", "fall")):
+                value = item[f"mean_return_when_yields_{key}_pct"]
+                count = item["rising_intervals" if key == "rise" else "falling_intervals"]
+                if value is not None:
+                    lines.append(f"  When yields {direction}: average adjusted interval return {value:+.3f}% across {count} intervals. This is an observed average, not a prediction.")
+        lines.append(relationships["method"])
+    return lines
+
+
 def format_check_value(name, value):
     if value is None:
         return "Unverified"
@@ -123,7 +195,31 @@ def build_figures(result, prices):
         figure.update_layout(template="plotly_white", font={"family": "Arial", "color": "#172033"},
                              margin={"l": 45, "r": 30, "t": 60, "b": 40}, legend={"orientation": "h"})
     history_rows.index.name = "date"
-    return {"allocation": allocation, "history": history, "scenarios": scenarios, "frontier": frontier}, history_rows
+    figures = {"allocation": allocation, "history": history, "scenarios": scenarios, "frontier": frontier}
+    if result.get("rate_price_observations"):
+        relationship = go.Figure()
+        summaries = {item["ticker"]: item for item in result["rate_price_relationships"]["instruments"]}
+        for ticker, item in summaries.items():
+            pairs = [row for row in result["rate_price_observations"] if row["ticker"] == ticker]
+            if not pairs:
+                continue
+            x = [row["yield_change_bps"] for row in pairs]
+            color = COLORS.get(ticker, "#64748b")
+            relationship.add_scatter(x=x, y=[row["adjusted_return_pct"] for row in pairs], mode="markers",
+                                     name=f"{ticker} / {item['proxy_series']} ({item['status']})", legendgroup=ticker,
+                                     marker={"color": color, "size": 5, "opacity": 0.5},
+                                     customdata=[[row["start"], row["end"]] for row in pairs],
+                                     hovertemplate="%{customdata[0]} to %{customdata[1]}<br>Yield move: %{x:.2f} bps<br>Adjusted return: %{y:.3f}%<extra>%{fullData.name}</extra>")
+            if item["status"] == "available":
+                ends = [min(x), max(x)]
+                relationship.add_scatter(x=ends, y=[item["intercept_return_pct"] + value * item["slope_return_pct_per_100bps"] / 100 for value in ends],
+                                         mode="lines", name=f"{ticker} historical fit", legendgroup=ticker,
+                                         line={"color": color}, hoverinfo="skip")
+        relationship.update_layout(template="plotly_white", title="Observed rate moves and adjusted returns — historical association",
+                                   xaxis_title="Matched Treasury yield change (basis points)",
+                                   yaxis_title="Adjusted return over the same interval (%)", height=460)
+        figures["rate_relationships"] = relationship
+    return figures, history_rows
 
 
 def deterministic_report(result):
@@ -153,6 +249,9 @@ def deterministic_report(result):
             lines.append(f"| {item['name']} | {item['status'].upper()} | {format_check_value(item['name'], item['measured'])} | {format_check_value(item['name'], item['limit'])} |")
     else:
         lines += ["No allocation passes every required check. Review the binding constraints; the tool has not relaxed them.", ""]
+    diversification = diversification_lines(result)
+    if diversification:
+        lines += ["", "## Spreading the investment", "", *diversification]
     lines += ["", "## Baseline comparison", ""]
     baseline = result["baseline"]
     if baseline:
@@ -165,6 +264,9 @@ def deterministic_report(result):
     lines += ["", "## Binding constraints across the search", ""]
     lines += [f"- {name}: {count:,} allocations failed." for name, count in search["failure_counts"].items()]
     lines += [f"- {name}: {count:,} allocations unverified." for name, count in search["unverified_counts"].items()]
+    rates = rate_report_lines(result)
+    if rates:
+        lines += ["", "## Interest rates (FRED)", "", *rates, ""]
     lines += ["", "## Method and limitations", ""]
     lines += [f"- {description}" for description in result["methodology"].values()]
     lines += [f"- {description}" for description in result["limitations"]]
@@ -189,14 +291,18 @@ def render_html(result, figures):
     notes = "".join(f"<li>{html.escape(note)}</li>" for note in [*result["methodology"].values(), *result["limitations"]])
     sources = "".join(f'<li>{html.escape(t)}: <a href="{html.escape(f.get("source_url", ""), quote=True)}">issuer snapshot</a>; yield {html.escape(str(f.get("yield_as_of")))}, duration {html.escape(str(f.get("duration_as_of")))}, spread {html.escape(str(f.get("spread_as_of")))}</li>' for t, f in result["fund_facts"]["funds"].items())
     failures = html.escape(json.dumps(result["search"], indent=2))
+    rate_lines = rate_report_lines(result)
+    rates_html = ("<h2>Interest rates (FRED)</h2>" + "".join(f"<p>{html.escape(line)}</p>" for line in rate_lines)) if rate_lines else ""
+    diversification = diversification_lines(result)
+    diversification_html = ("<h2>Spreading the investment</h2>" + "".join(f"<p>{html.escape(line)}</p>" for line in diversification)) if diversification else ""
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claims reserve allocation</title><style>
 body{{margin:0;background:#f4f7fb;color:#172033;font:15px/1.6 Arial,sans-serif}}main{{max-width:1180px;margin:40px auto;padding:32px;background:white;border-radius:18px}}h1{{font-size:32px;line-height:1.2}}h2{{margin-top:36px}}.tag{{color:#0d9488;font-weight:bold}}.scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:13px}}td,th{{padding:10px;text-align:left;border-bottom:1px solid #e2e8f0}}th{{background:#eff6ff}}pre{{white-space:pre-wrap;background:#f8fafc;padding:16px}}a{{color:#2563eb}}
 </style></head><body><main><p class="tag">CLAIMS FIRST · PROTOTYPE 1</p><h1>{html.escape(title)}</h1>
 <p>${p['budget_usd']:,.0f} USD · {p['horizon_months']} months · ${p['minimum_cash_usd']:,.0f} immediately accessible reserve.</p>
 <p>Editable demo assumptions. Current income run-rate is not a forecast. Historical replay has no claims withdrawals.</p>
-{plots}<h2>Allocation checks</h2><div class="scroll">{checks_html}</div><h2>Baseline comparison</h2><div class="scroll">{comparison_html}</div>
-<h2>Fund evidence</h2><div class="scroll">{fund_html}</div><h2>Search audit</h2><pre>{failures}</pre>
+{plots}{diversification_html}<h2>Allocation checks</h2><div class="scroll">{checks_html}</div><h2>Baseline comparison</h2><div class="scroll">{comparison_html}</div>
+{rates_html}<h2>Fund evidence</h2><div class="scroll">{fund_html}</div><h2>Search audit</h2><pre>{failures}</pre>
 <h2>How to read this report</h2><ul>{notes}</ul><h2>Issuer sources and dates</h2><ul>{sources}</ul>
 <p>Analysis date: {result['analysis_date']}. Price window: {result['common_history']['start']}–{result['common_history']['end']}.</p></main></body></html>'''
 
@@ -211,4 +317,6 @@ def save_outputs(result, prices, data_dir):
     pd.DataFrame(result["candidate_audit"]).to_csv(data_dir / "candidate_allocations.csv", index=False)
     pd.DataFrame(candidate_rows(result)).to_csv(data_dir / "portfolio_comparison.csv", index=False)
     history.to_csv(data_dir / "portfolio_history.csv")
+    pd.DataFrame(result.get("rate_price_observations", []), columns=["ticker", "proxy_series", "start", "end", "yield_change_bps", "adjusted_return_pct"]).to_csv(
+        data_dir / "rate_price_observations.csv", index=False)
     return figures

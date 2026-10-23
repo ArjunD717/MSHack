@@ -37,6 +37,9 @@ class ClientPolicy:
     grid_step_pct: int = 5
     cash_annual_rate_pct: float = 0.0
     baseline_ticker: str = "BIL"
+    minimum_holdings: int = 3
+    minimum_holding_pct: float = 10.0
+    maximum_holding_pct: float = 35.0
 
     def __post_init__(self):
         for key, value in asdict(self).items():
@@ -50,7 +53,7 @@ class ClientPolicy:
             raise ValueError("Budget must be positive and expressed to whole cents.")
         if self.currency != "USD":
             raise ValueError("This prototype supports USD client obligations only.")
-        for key in ("horizon_months", "claim_due_days", "assumed_sale_delay_days", "maximum_price_age_days", "maximum_fact_age_days", "minimum_history_sessions", "grid_step_pct"):
+        for key in ("minimum_holdings", "horizon_months", "claim_due_days", "assumed_sale_delay_days", "maximum_price_age_days", "maximum_fact_age_days", "minimum_history_sessions", "grid_step_pct"):
             if not isinstance(getattr(self, key), int):
                 raise ValueError(f"{key} must be a whole number.")
         if self.horizon_months < 1 or self.minimum_history_sessions < 252:
@@ -63,6 +66,8 @@ class ClientPolicy:
             raise ValueError("The linear duration approximation is limited to shocks of at most 300 bps.")
         if self.cash_annual_rate_pct > 20:
             raise ValueError("The assumed cash rate must be between 0% and 20%.")
+        if not 0 < self.minimum_holding_pct <= self.maximum_holding_pct <= 100:
+            raise ValueError("Holding limits must satisfy 0 < minimum_holding_pct <= maximum_holding_pct <= 100.")
 
 
 def load_policy(path=DEFAULT_POLICY_PATH):
@@ -200,7 +205,8 @@ def _money(weights, assets, budget):
 def evaluate_allocation(weights, assets, metrics, policy, evidence, common_history):
     amounts = _money(weights, assets, policy.budget_usd)
     actual_weights = {asset: amount / policy.budget_usd for asset, amount in amounts.items()}
-    held = [evidence[a] for a in assets[1:] if actual_weights[a] > EPSILON]
+    held = [evidence[a] for a in assets[1:] if amounts[a] > 0]
+    holding_pcts = [actual_weights[e["ticker"]] * 100 for e in held]
     cash = amounts["CASH"]
     duration_known = all(e["duration_years"] is not None for e in held)
     spread_known = all(e["spread_pct"] is not None for e in held)
@@ -224,6 +230,15 @@ def evaluate_allocation(weights, assets, metrics, policy, evidence, common_histo
     vol = metrics["annualized_volatility_pct"]
     drawdown = metrics["max_drawdown_pct"]
     checks = [
+        check("Minimum investment holdings", len(held), policy.minimum_holdings,
+              len(held) >= policy.minimum_holdings,
+              "Count separate fund holdings. Cash does not count. Every held fund must also meet the minimum size below."),
+        check("Minimum holding size (%)", min(holding_pcts) if held else "No investments", policy.minimum_holding_pct,
+              all(weight + EPSILON >= policy.minimum_holding_pct for weight in holding_pcts),
+              "Each nonzero fund holding must be at least this percentage of the full budget. Tiny token holdings fail."),
+        check("Maximum single holding (%)", max(holding_pcts, default=0), policy.maximum_holding_pct,
+              all(weight <= policy.maximum_holding_pct + EPSILON for weight in holding_pcts),
+              "No fund may exceed this percentage of the full budget. Immediately accessible cash is excluded."),
         check("Budget and weights", round(sum(amounts.values()), 2), policy.budget_usd,
               min(amounts.values()) >= 0 and abs(sum(amounts.values()) - policy.budget_usd) < 0.005,
               "Nonnegative dollar allocations must sum to the full budget."),
@@ -256,6 +271,7 @@ def evaluate_allocation(weights, assets, metrics, policy, evidence, common_histo
     return {
         "weights": actual_weights, "amounts_usd": amounts, "status": _status(checks), "checks": checks,
         "metrics": {**metrics, "duration_years": duration,
+                    "investment_holdings": len(held), "largest_holding_pct": max(holding_pcts, default=0),
                     "rate_up_loss_usd": round(rate_loss, 2) if rate_loss is not None else None,
                     "income_run_rate_usd": round(run_rate, 2) if run_rate is not None else None,
                     "income_run_rate_pct": round(run_rate / policy.budget_usd * 100, 4) if run_rate is not None else None,
@@ -343,6 +359,15 @@ def run_validation(prices, metadata, policy, facts, as_of=None):
     comparison = None
     if selected and baseline and selected["metrics"]["income_run_rate_usd"] is not None and baseline["metrics"]["income_run_rate_usd"] is not None:
         comparison = round(selected["metrics"]["income_run_rate_usd"] - baseline["metrics"]["income_run_rate_usd"], 2)
+    # Compare against the original unconstrained concentration rules to make the
+    # diversification cost visible. This is a reference, never an eligible fallback.
+    diversification_checks = {"Minimum investment holdings", "Minimum holding size (%)", "Maximum single holding (%)"}
+    reference_candidates = [c for c in candidates if all(item["status"] == "pass" for item in c["checks"]
+                                                        if item["name"] not in diversification_checks)]
+    reference = _detail(min(reference_candidates, key=ranking), table, policy) if reference_candidates else None
+    income_change = None
+    if selected and reference:
+        income_change = round(selected["metrics"]["income_run_rate_usd"] - reference["metrics"]["income_run_rate_usd"], 2)
     return {
         "prototype": 1, "status": status, "analysis_date": today.isoformat(),
         "policy": asdict(policy), "common_history": common_history, "market_source": metadata,
@@ -352,6 +377,12 @@ def run_validation(prices, metadata, policy, facts, as_of=None):
                    "failure_counts": dict(failures), "unverified_counts": dict(unknowns)},
         "selected": selected, "provisional": provisional, "baseline": baseline,
         "income_run_rate_advantage_over_baseline_usd": comparison,
+        "diversification": {
+            "scope": "Holdings across Treasury funds; all still share US government debt exposure.",
+            "comparison_without_holding_limits": reference,
+            "income_change_vs_without_holding_limits_usd": income_change,
+            "comparison_note": "Same grid, evidence and risk limits, ignoring only the three holding rules. The reference retains its actual check status and is not an eligible fallback.",
+        },
         "alternatives": [_detail(c, table, policy) for c in passing[1:4]],
         "candidate_audit": [
             {"status": c["status"], **c["amounts_usd"], **c["metrics"],
@@ -366,6 +397,7 @@ def run_validation(prices, metadata, policy, facts, as_of=None):
             "rate_stress": "Approximate price change = -effective duration × change in yield. Instantaneous parallel shock; omits convexity, curve shape, changing spreads, default and market closure.",
             "income": "Budget × allocation weights × dated 30-day SEC yields plus assumed cash interest. Already after fund expenses; not a future return or guaranteed distribution. The horizon scales the illustrative run-rate only.",
             "cash": "CASH is an operational modelling assumption of immediately accessible USD. The same assumed fixed interest rate is used throughout the historical replay; bank credit, account access and deposit protection are not verified.",
+            "diversification": f"Require at least {policy.minimum_holdings} non-cash fund holdings, each between {policy.minimum_holding_pct:g}% and {policy.maximum_holding_pct:g}% of the full budget when held. Cash is excluded. All other evidence, cash, historical-risk and rate-stress checks still apply. If no allocation passes, no constraints are silently relaxed. Only initial allocation weights are constrained; buy-and-hold weights may later drift.",
         },
         "limitations": [
             "All policy thresholds are editable hackathon assumptions, not universal definitions of low risk or regulatory approval.",
@@ -384,4 +416,8 @@ def candidate_rows(result):
     for label, candidate in [("Selected", result["selected"]), ("Unverified illustration", result["provisional"]), ("Baseline", result["baseline"])]:
         if candidate:
             rows.append({"portfolio": label, "status": candidate["status"], **candidate["amounts_usd"], **candidate["metrics"]})
+    reference = result.get("diversification", {}).get("comparison_without_holding_limits")
+    if reference:
+        rows.append({"portfolio": "Comparison without holding limits (not an eligible fallback)",
+                     "status": reference["status"], **reference["amounts_usd"], **reference["metrics"]})
     return rows

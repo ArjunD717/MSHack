@@ -38,9 +38,135 @@ Use Python 3.10 or newer.
 `--no-ai` is an alias for `--data-only`. All reports are generated before an optional
 AI request. The price source also runs independently with `yfinance_source.py`.
 
+## FRED interest-rate integration
+
+FRED is optional in the command-line pipeline. It adds dated rate context and
+illustrations of bond-price sensitivity without changing the allocation rules,
+income assumptions or required hypothetical rate-shock check. The dashboard has
+not been changed; its UI can use the backend functions below.
+
+Register a [FRED API key](https://fred.stlouisfed.org/docs/api/api_key.html), then
+set it in the same PowerShell session used to run the pipeline:
+
+```powershell
+$env:FRED_API_KEY = "your-fred-api-key"
+.\.venv\Scripts\python.exe main.py --data-only --fred
+
+# Refresh only FRED (also enables the integration).
+.\.venv\Scripts\python.exe main.py --data-only --refresh-fred
+
+# Refresh both price history and FRED.
+.\.venv\Scripts\python.exe main.py --data-only --refresh --refresh-fred
+
+# Fetch or inspect rate data independently of portfolio validation.
+.\.venv\Scripts\python.exe fred_source.py --refresh
+```
+
+No additional dependencies are required. Keys are used for API requests only;
+the generated files and error messages exclude the credential and request URL.
+The cache is `data/fred_rates.json` and can be reused without a key. The source
+uses the official [FRED observations API](https://fred.stlouisfed.org/docs/api/fred/series_observations.html).
+
+| Series | Role |
+| --- | --- |
+| [DFF](https://fred.stlouisfed.org/series/DFF) | Effective federal funds rate, for economic context |
+| [DGS3MO](https://fred.stlouisfed.org/series/DGS3MO) | 3-month Treasury yield, a maturity proxy for BIL |
+| [DGS2](https://fred.stlouisfed.org/series/DGS2) | 2-year Treasury yield, a maturity proxy for SHY |
+| [DGS10](https://fred.stlouisfed.org/series/DGS10) | 10-year Treasury yield, a maturity proxy for IEF |
+
+All rates are annual percentages. Changes are expressed in basis points: a move
+from 4.00% to 4.25% is +25 bps. Each series includes its latest observation,
+freshness, and changes over 30 and 365 calendar days. Each window ends on that
+series' latest available date; the earlier endpoint must be on/before the target
+date and within seven calendar days of it. Both actual endpoints are retained.
+Missing observations (`.`) stay missing; rates are never forward-filled or
+replaced with zero. Negative yields are supported.
+
+For selected, provisional, baseline and alternative portfolios, the backend adds:
+
+```text
+estimated price change = -holding dollars × reviewed effective duration × (yield change in bps / 10,000)
+```
+
+For example, $75,000 in a fund with duration 1.8 has an estimated $337.50 price
+loss for a +25 bps move in its proxy yield. A negative yield move gives a gain.
+These scenarios apply observed moves to today's holdings. They do **not** explain
+actual past performance, forecast future prices or change portfolio selection.
+Do not add them to the historical replay: the price data already reflects rate
+movements. DFF does not replace the assumed cash-account interest rate, and
+Treasury yields do not replace fund SEC yields. Curve proxies are approximate;
+the estimates omit income, convexity and other price drivers.
+
+Latest observations older than the policy's `maximum_price_age_days` remain
+visible with an `unverified` status; their changes and portfolio impacts become
+unavailable. Missing earlier endpoints, missing reviewed duration, unsupported
+tickers, and moves beyond the existing model's 300 bps limit also produce
+unverified estimates rather than zero. A missing unused proxy does not prevent
+calculations for other holdings. CASH has no bond-price effect in these scenarios.
+The base allocation's pass/fail status is independent of this optional evidence.
+
+`--start` and `--end` also control FRED's requested history; `--end` is exclusive.
+A different request requires `--refresh-fred` or another data directory. Cache
+reuse does not fetch updates automatically. Failed or incomplete downloads raise
+an error and leave the previous cache intact; stale data is never substituted
+silently. An explicitly requested FRED run with no key and no cache fails with
+setup guidance. Downloaded observations reflect the FRED vintage at retrieval,
+not the information available at each historical investment date.
+
+Successful FRED runs include `interest_rates` in `validation.json` and in the AI
+payload's `validation_result`. Individual portfolios contain
+`observed_rate_scenarios`. Summaries appear in `report.md`, `report.html` and CLI
+output. The full observation history remains in `fred_rates.json`, outside the
+AI payload. Running without either FRED flag preserves the original pipeline.
+
+The pipeline also measures the relationship between actual Yahoo adjusted-price
+returns and FRED yield changes. For each fund it matches both sources on exact
+dates, keeps the last matched date per Friday-ending week, and compares
+non-overlapping intervals of 4–10 calendar days. It excludes longer gaps and
+short partial weeks rather than filling missing data. At least 26 recent-ended
+intervals with varying yields and returns are required; this is a prototype
+evidence threshold, not a statistical significance test.
+
+`rate_price_relationships` contains the sample dates/count, correlation, fitted
+return sensitivity per +100 bps, R-squared, and average returns when yields rose
+or fell. It measures changes rather than correlating price and rate levels.
+This is a descriptive fit on the same historical sample, not a causal claim or
+an out-of-sample forecast. Adjusted-price returns include distributions; these
+are distinct from the duration-based price estimates. Sources can differ in
+within-day timestamps, and relationships can change over time.
+
+The offline report adds a scatter chart and fitted lines. Exact paired intervals
+are exported to `rate_price_observations.csv` and retained in validation evidence;
+they are excluded from the AI payload, which receives only summary statistics.
+On a run without FRED the paired CSV is written with headers only, clearing prior
+observations from that output. The allocation objective and required policy
+checks still operate as before. The Streamlit UI remains unchanged.
+
+For teammates integrating the new UI:
+
+```python
+from fred_source import prepare_rate_data, attach_rate_analysis
+
+snapshot = prepare_rate_data(start=start, end=end, data_dir=data_dir, refresh=False)
+attach_rate_analysis(result, snapshot, prices=prices)  # result is from run_validation()
+# Then call save_outputs() and build_payload() with the enriched result.
+```
+
+`summarize_rates(snapshot, as_of=..., maximum_age_days=7)` exposes the rate context
+alone. Only observations on/before `as_of` are used, but this does not recreate a
+historical vintage. Use a separate FRED refresh control and include the snapshot
+in the UI's result-cache fingerprint so refreshed data invalidates old results.
+
 To enable the AI explanation in the dashboard, open **Risk & Evidence** and paste
 your key into the masked **Azure API key (current session)** field. It is kept in the
 current dashboard session and is not saved to project files or reports.
+
+The optional explanation uses plain English for readers with little investment
+knowledge. It starts with the result, then covers where the money goes, why it
+was selected, how it compares with the baseline, and the main risks and limits.
+The same instructions apply in the dashboard and CLI. The AI is instructed to
+preserve calculated amounts, check results and missing-evidence warnings; it
+does not select investments or change the allocation.
 
 Alternatively, set the key before starting the dashboard or CLI. A key set in a
 different PowerShell window will not update an already-running server:
@@ -79,6 +205,9 @@ not agreed client requirements or universal definitions of low risk.
 | Allocation increments | 5 percentage points |
 | Assumed cash interest | 0% |
 | Baseline | Required cash reserve plus the rest in BIL |
+| Minimum fund holdings (cash excluded) | 3 |
+| Minimum size of each held fund | 10% of the full budget |
+| Maximum size of any one fund | 35% of the full budget |
 
 The claim is a single total payment, not an additional payment on top of the
 reserve. Only CASH counts as immediately accessible; an ETF is not cash. Sale
@@ -144,6 +273,50 @@ IEF (7–10 year Treasuries). They share US Treasury exposure; adding fund ticke
 does not remove this common risk. Eligibility here means a sourced Treasury ETF
 classification, not a credit-rating, solvency or regulatory capital assessment.
 
+### Enforced spreading across Treasury funds
+
+The default engine now requires **at least three funds**, with every nonzero fund
+holding between **10% and 35% of the full budget**. These are editable prototype
+assumptions, not investment rules. Cash does not count as a fund and has no 35%
+cap: the immediately accessible reserve still takes priority through its own
+minimum. Tiny token allocations fail the minimum-size check. All amounts are
+checked after rounding to cents, matching the displayed allocation. The rules
+apply to starting weights; the historical replay remains buy-and-hold, so weights
+may drift and there is no rebalancing model.
+
+This spreads the current three-fund universe across Treasury maturities. It does
+not add company shares, corporate credit, other issuers or asset classes, and
+does not guarantee a smaller loss. All existing risk and evidence checks still
+apply. The engine returns infeasible if the holdings, cash, grid and risk limits
+cannot be met together; it never reduces the holding count or loosens risk limits
+automatically. An evidence gap remains unverified even if a required fund could
+otherwise be omitted to improve the result. Coarse grids can make the policy
+infeasible: for example, 25% steps force at least 25% into IEF, which can breach
+the rate-loss limit. The default 5% steps avoid that particular grid restriction.
+
+`config/client_policy.json` and `ClientPolicy` share these defaults. The existing
+Streamlit dashboard uses the rules automatically through the backend; its layout
+has not changed. Restart Streamlit or recalculate to apply them. The rules appear
+in its check table and evidence. Custom policy files omitting the new fields also
+inherit the defaults. Adjust `minimum_holdings`, `minimum_holding_pct` and
+`maximum_holding_pct` explicitly when using a different fund universe.
+
+Reports explain the income and risk trade-off against a second search over the
+same grid, evidence and risk limits, ignoring just the three holding rules.
+`validation.json` stores this under
+`diversification.comparison_without_holding_limits`; its check status is retained
+and it is clearly labelled as a comparison, never an eligible fallback. It is
+also included in `portfolio_comparison.csv`. The original single-BIL baseline
+remains for comparison and now fails the holding-count and concentration checks.
+
+Using the cached 23 October 2026 snapshot, the diversified result was $25,000
+cash, $30,000 BIL, $35,000 SHY and $10,000 IEF. Current annual income was $3,270,
+versus $3,510 without holding limits: a $240 reduction. The historical largest
+fall was 4.459%, versus 4.347% for the concentrated reference, illustrating why
+spreading holdings does not improve every risk measure. These numbers depend on
+the supplied prices, issuer facts and policy; they are not fixed outputs or
+forecasts.
+
 ## Issuer evidence: update separately from prices
 
 `config/fund_facts.json` contains manually reviewed issuer values with individual
@@ -166,7 +339,7 @@ facts are never applied as if they were historical predictors in the price repla
 ## Price source and custom universes
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --data-only --refresh --tickers BIL SHY --start 2020-01-01 --end 2026-10-23
+.\.venv\Scripts\python.exe main.py --data-only --refresh --tickers BIL SHY IEF --start 2020-01-01 --end 2026-10-23
 ```
 
 Add reviewed entries for custom tickers to the facts file, and set the policy's

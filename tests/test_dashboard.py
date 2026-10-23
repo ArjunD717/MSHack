@@ -47,6 +47,10 @@ class DashboardTests(unittest.TestCase):
                 ai_button = next(b for b in app.button if b.label == "Generate AI brief")
                 self.assertFalse(ai_button.disabled)
                 self.assertNotIn("session-ui-test-only", (root / "model_input.json").read_text())
+                initial = json.loads((root / "validation.json").read_text())
+                self.assertEqual(initial["selected"]["metrics"]["investment_holdings"], 3)
+                self.assertLessEqual(initial["selected"]["metrics"]["largest_holding_pct"], 35 + 1e-8)
+                self.assertLessEqual(initial["selected"]["amounts_usd"]["SHY"], 35000)
 
                 app.number_input(key="sb_reserve").set_value(40000)
                 next(b for b in app.button if b.label == "Apply & recalculate").click().run(timeout=45)
